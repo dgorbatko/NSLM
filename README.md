@@ -44,6 +44,14 @@ SteamGridDB is an optional community fallback. A SteamGridDB match is not treate
 
 Before a Steam update, NSLM asks Steam to close, creates a ZIP backup, writes shortcut and artwork updates atomically, and verifies the result. It changes only the selected Steam profile's non-Steam shortcut configuration and grid artwork; it does not alter installed games, game folders, saves, or native Steam library metadata.
 
+### Important
+
+NSLM is an independent third-party utility. It is not affiliated with, endorsed by, sponsored by, or licensed by Valve Corporation, Steam, SteamDB, or SteamGridDB. Steam and the Steam logo are trademarks and/or registered trademarks of Valve Corporation in the U.S. and/or other countries.
+
+NSLM does not include, download, distribute, unlock, or modify game executables, game content, DRM, Steam accounts, or Steam purchases. Artwork is requested from the selected public artwork source and cached only on the user's own computer.
+
+Backups and verification are intended to reduce the risk of an accidental library change, not eliminate it. Always review the selected profile and changes before updating Steam, and keep the generated backup until you have confirmed that your library looks correct. You use NSLM at your own risk; the software is provided without warranty, as set out in the [MIT License](LICENSE).
+
 Application data is stored under `%LOCALAPPDATA%\NSLM\`:
 
 - `settings.json` — Steam path, selected profile, and scan folders.
@@ -77,3 +85,9 @@ The generated archive is written to `dist\NSLM-Windows-x64.zip`.
 ## Third-party notices
 
 Bundled third-party license notices are included in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) and in the packaged application.
+
+## Contributing and support
+
+Bug reports and feature requests are welcome in [GitHub Issues](../../issues). Please include the NSLM version, Windows version, steps to reproduce the issue, and the relevant part of `error.log` with any personal paths or API keys removed.
+
+NSLM is currently a free open-source project. A voluntary donation link may be added here in the future; donations would support development and testing, not provide a commercial support contract.
