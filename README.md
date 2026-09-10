@@ -90,4 +90,4 @@ Bundled third-party license notices are included in [`THIRD-PARTY-NOTICES.md`](T
 
 Bug reports and feature requests are welcome in [GitHub Issues](../../issues). Please include the NSLM version, Windows version, steps to reproduce the issue, and the relevant part of `error.log` with any personal paths or API keys removed.
 
-NSLM is currently a free open-source project. A voluntary donation link may be added here in the future; donations would support development and testing, not provide a commercial support contract.
+NSLM is a free open-source project. If it saves you time, you can [support its development on Ko-fi](https://ko-fi.com/dgorbatko). Donations are voluntary and help fund development and testing; they do not provide a commercial support contract.
