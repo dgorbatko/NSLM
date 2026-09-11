@@ -8,6 +8,7 @@ release_url="https://github.com/${repo}/releases/latest/download/${asset}"
 checksum_url="${release_url}.sha256"
 install_dir="${NSLM_INSTALL_DIR:-$HOME/Applications/NSLM}"
 desktop_file="${NSLM_DESKTOP_FILE:-$HOME/.local/share/applications/NSLM.desktop}"
+desktop_shortcut="${NSLM_DESKTOP_SHORTCUT:-$HOME/Desktop/NSLM.desktop}"
 
 case "$(uname -m)" in
   x86_64|amd64) ;;
@@ -99,6 +100,9 @@ write_launcher() {
   mv "$temporary" "$destination"
 }
 write_launcher "$desktop_file"
+# Keep a real desktop launcher too. It always targets the fixed installation
+# path, so future NSLM updates replace the app while this icon stays current.
+write_launcher "$desktop_shortcut"
 # Linux executables do not contain a Finder/Explorer-style icon.  Keep the
 # binary for scripts, and place an icon-bearing desktop launcher beside it for
 # users opening the installed folder in Dolphin.
