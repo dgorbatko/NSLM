@@ -289,7 +289,15 @@ def restart(steam):
         subprocess.Popen(['open', '-a', 'Steam'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     else:
         launcher = shutil.which('steam') or str(Path(steam) / 'steam.sh')
-        subprocess.Popen([launcher], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Desktop launchers on SteamOS run applications in an app-specific
+        # systemd cgroup.  Starting Steam as our child makes KDE's screen-share
+        # portal attribute Steam's own PipeWire request to NSLM.  A transient
+        # user scope gives Steam its own identity, just like launching it from
+        # the desktop menu does.
+        systemd_run = shutil.which('systemd-run')
+        command = ([systemd_run, '--user', '--scope', '--collect', '--no-block', '--quiet', '--', launcher]
+                   if systemd_run else [launcher])
+        subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 class Snapshot(dict):

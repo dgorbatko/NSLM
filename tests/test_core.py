@@ -282,6 +282,20 @@ def test_restarted_steam_aborts_commit(fixture, tmp_path, monkeypatch):
     assert not (config / 'shortcuts.vdf').exists()
 
 
+def test_linux_restart_uses_a_separate_user_scope(tmp_path, monkeypatch):
+    """Steam must not inherit a desktop launcher's application identity."""
+    launched = Mock()
+    monkeypatch.setattr(steam.sys, 'platform', 'linux')
+    monkeypatch.setattr(steam.shutil, 'which', lambda name: {
+        'steam': '/usr/bin/steam', 'systemd-run': '/usr/bin/systemd-run',
+    }.get(name))
+    monkeypatch.setattr(steam.subprocess, 'Popen', launched)
+    steam.restart(tmp_path / 'Steam')
+    assert launched.call_args.args[0] == [
+        '/usr/bin/systemd-run', '--user', '--scope', '--collect', '--no-block', '--quiet', '--', '/usr/bin/steam',
+    ]
+
+
 def test_corrupt_library_is_not_overwritten(fixture, tmp_path):
     root, config, exe = fixture
     (config / 'shortcuts.vdf').write_bytes(b'corrupt')

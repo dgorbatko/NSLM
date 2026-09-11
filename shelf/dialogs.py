@@ -758,6 +758,21 @@ class GameDialog(QDialog):
                 preview.setText('No artwork selected')
                 self.selected_art_labels[kind].setText('No artwork selected')
             self.mark_selected_art(kind)
+        # On Wayland, a pixmap changed while its tab is visible can remain
+        # cached until Qt receives another tab-change event.  Request a second
+        # paint on the next event-loop turn so the chosen best artwork appears
+        # immediately, without the user having to switch tabs away and back.
+        self.repaint_visible_artwork()
+        QTimer.singleShot(0, self.repaint_visible_artwork)
+
+    def repaint_visible_artwork(self):
+        if not hasattr(self, 'art_tabs'):
+            return
+        page = self.art_tabs.currentWidget()
+        if page:
+            page.updateGeometry()
+            page.update()
+        self.art_tabs.update()
 
     def mark_selected_art(self, kind):
         selected_url = self.game.art_sources.get(kind, '')

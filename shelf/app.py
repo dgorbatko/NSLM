@@ -8,7 +8,7 @@ from PySide6.QtCore import Qt, QTimer, QUrl, QLockFile, QSize
 from PySide6.QtGui import QDesktopServices, QFont, QIcon, QPainter, QColor, QPen
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QFrame, QVBoxLayout, QHBoxLayout, QGridLayout,
     QStackedWidget, QScrollArea, QLineEdit, QComboBox, QCheckBox, QProgressBar, QMessageBox, QFileDialog,
-    QDialog, QListWidget, QListWidgetItem, QDialogButtonBox, QLayout)
+    QDialog, QListWidget, QListWidgetItem, QDialogButtonBox, QLayout, QSizePolicy)
 from .models import Game, ART_TYPES, is_emulator, normal_path, normalized_title
 from .storage import Store, data_dir
 from .widgets import label, button, panel, Worker, GameCard, Cover, ScanningBanner, FilterComboBox
@@ -667,15 +667,22 @@ class MainWindow(QMainWindow):
             collection_note = f' Added to: {", ".join(selected_collections)}.' if selected_collections else ''
             complete = QDialog(self)
             complete.setWindowTitle('Steam library updated')
-            complete.setFixedWidth(520)
+            # Qt's Wayland size hint can under-estimate a wrapped QLabel by a
+            # line.  Give the completion text a real layout allocation rather
+            # than relying on a too-small auto-sized dialog.
+            complete.setMinimumSize(560, 280)
+            complete.resize(560, 280)
             complete_layout = QVBoxLayout(complete)
             complete_layout.setContentsMargins(28, 25, 28, 25)
             complete_layout.setSpacing(14)
             complete_layout.addWidget(label('Steam library updated', 'section'))
-            complete_layout.addWidget(label(
+            completion_text = label(
                 f'Added / updated: {changed_count}.\nSkipped: {skipped_count}.{collection_note}\n\n'
                 'The new cards have been removed from this list. Steam is closed; launch it only when you are ready.',
-                'muted', True))
+                'muted', True)
+            completion_text.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.MinimumExpanding)
+            completion_text.setMinimumHeight(104)
+            complete_layout.addWidget(completion_text, 1)
             complete_buttons = QHBoxLayout()
             complete_buttons.addStretch()
             complete_buttons.addWidget(button('OK', complete.accept))
