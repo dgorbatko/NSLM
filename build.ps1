@@ -1,5 +1,9 @@
-$ErrorActionPreference = 'Stop'
-Set-Location -LiteralPath $PSScriptRoot
+# Native tools (pip, pytest and PyInstaller) may emit ordinary diagnostics on
+# stderr.  Under Windows OpenSSH, treating every stderr line as a terminating
+# PowerShell error aborts an otherwise successful build.  Every native step
+# below already checks $LASTEXITCODE explicitly.
+$ErrorActionPreference = 'Continue'
+Set-Location -LiteralPath $PSScriptRoot -ErrorAction Stop
 if (-not (Test-Path -LiteralPath '.venv\Scripts\python.exe')) {
     python -m venv .venv
     if ($LASTEXITCODE -ne 0) { throw 'Could not create build environment' }
