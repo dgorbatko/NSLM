@@ -158,6 +158,7 @@ def test_linux_steam_discovery_and_xdg_data_dir(tmp_path, monkeypatch):
     home = tmp_path / 'home'
     steam_root = home / '.local' / 'share' / 'Steam'
     (steam_root / 'userdata').mkdir(parents=True)
+    monkeypatch.setattr(steam.sys, 'platform', 'linux')
     monkeypatch.setattr(steam.Path, 'home', lambda: home)
     monkeypatch.delenv('NSLM_DATA', raising=False)
     monkeypatch.delenv('STEAMSHELF_DATA', raising=False)

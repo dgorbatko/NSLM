@@ -23,12 +23,13 @@ FAVORITES_TAG = 'favorite'
 
 
 def discover_steam():
-    try:
-        import winreg
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Valve\Steam') as key:
-            return winreg.QueryValueEx(key, 'SteamPath')[0]
-    except (OSError, ImportError, AttributeError):
-        pass
+    if sys.platform == 'win32':
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Valve\Steam') as key:
+                return winreg.QueryValueEx(key, 'SteamPath')[0]
+        except (OSError, ImportError, AttributeError):
+            pass
     mac_steam = Path.home() / 'Library/Application Support/Steam'
     if mac_steam.is_dir():
         return str(mac_steam)
