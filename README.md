@@ -15,6 +15,16 @@ Keep the `_internal` folder next to the executable.
 
 No Python installation is needed for the packaged app.
 
+### One-command Steam Deck install
+
+In **Desktop Mode**, open Konsole and run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dgorbatko/NSLM/main/install-steamdeck.sh | bash
+```
+
+The installer downloads the current Linux release, verifies its SHA-256 checksum, installs it at `~/Applications/NSLM`, and adds **NSLM** to the application menu. Re-running the command updates NSLM and preserves the previous app folder as a rollback copy. Review the [installer source](install-steamdeck.sh) before running it if you prefer.
+
 ## What NSLM does
 
 - Scans one or more game folders without blocking the interface.
