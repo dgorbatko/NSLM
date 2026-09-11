@@ -11,7 +11,9 @@ if (-not (Test-Path -LiteralPath '.venv\Scripts\python.exe')) {
 & '.venv\Scripts\python.exe' -m pip install -r requirements-dev.txt
 if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
 & '.venv\Scripts\python.exe' tools\make_icon.py
-$pytestTemp = Join-Path -Path $PSScriptRoot -ChildPath ('artifacts\pytest-' + [guid]::NewGuid().ToString('N'))
+$artifacts = Join-Path -Path $PSScriptRoot -ChildPath 'artifacts'
+New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
+$pytestTemp = Join-Path -Path $artifacts -ChildPath ('pytest-' + [guid]::NewGuid().ToString('N'))
 & '.venv\Scripts\python.exe' -m pytest -q tests -p no:cacheprovider --basetemp $pytestTemp
 if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
 & '.venv\Scripts\python.exe' -m PyInstaller --noconfirm --clean NSLM.spec
