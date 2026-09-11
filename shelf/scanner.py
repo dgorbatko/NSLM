@@ -222,7 +222,14 @@ def scan(sources, cancel, progress=lambda _: None):
                 suffixes = {'.nsp', '.xci', '.nro'}
             else:
                 suffixes = {'.nsp', '.xci', '.nro', '.iso', '.chd', '.rvz', '.zip'}
+        elif source.kind == 'linux_pc':
+            # Native Linux games commonly have no extension.  Limit these to
+            # executable files below, rather than treating arbitrary data as a
+            # launch candidate.
+            suffixes = None
         else:
+            # Windows / Proton titles retain the proven .exe scanner on every
+            # platform, including Steam Deck.
             suffixes = {'.exe'}
 
         files = list(walk_files(root, cancel, warnings, progress, suffixes))
@@ -261,12 +268,18 @@ def scan(sources, cancel, progress=lambda _: None):
             continue
 
         groups = {}
+
+        def is_candidate(path):
+            if source.kind == 'linux_pc':
+                return path.is_file() and os.access(path, os.X_OK) and not path.name.startswith('.')
+            return path.suffix.casefold() == '.exe'
+
         # Distinguish a collection folder from a single game folder
-        root_exes = [p for p in files if p.parent == root and p.suffix.casefold() == '.exe' and not BAD_EXE.search(p.stem)]
+        root_exes = [p for p in files if p.parent == root and is_candidate(p) and not BAD_EXE.search(p.stem)]
         child_dirs_with_exes = {
             p.relative_to(root).parts[0]
             for p in files
-            if len(p.relative_to(root).parts) > 1 and p.suffix.casefold() == '.exe' and not BAD_EXE.search(p.stem)
+            if len(p.relative_to(root).parts) > 1 and is_candidate(p) and not BAD_EXE.search(p.stem)
         }
         internal_dirs = {'bin', 'binaries', 'content', 'engine', 'game', 'win64', 'win32', 'x64', 'x86'}
         has_multiple_game_subdirs = len(child_dirs_with_exes - internal_dirs) > 1
@@ -285,7 +298,7 @@ def scan(sources, cancel, progress=lambda _: None):
             if time.monotonic() - last_report > .15:
                 progress(f'Checking executables: {index + 1}/{len(files)} · {path.name}')
                 last_report = time.monotonic()
-            if path.suffix.casefold() != '.exe':
+            if not is_candidate(path):
                 continue
             relative = path.relative_to(root)
             group_root = root if root_is_game or len(relative.parts) == 1 else root / relative.parts[0]
@@ -299,6 +312,6 @@ def scan(sources, cancel, progress=lambda _: None):
             if ambiguous:
                 reasons.append('Multiple launch candidates; review the selection')
                 score = min(score, 59)
-            game = Game(title, str(path), source=folder, confidence=score, reasons=reasons or ['Candidate based on folder structure'], alternatives=[str(c[1]) for c in candidates], search_names=search_names, selected=score >= 60)
+            game = Game(title, str(path), source=folder, kind=source.kind, confidence=score, reasons=reasons or ['Candidate based on folder structure'], alternatives=[str(c[1]) for c in candidates], search_names=search_names, selected=score >= 60)
             found[game.key] = game
     return list(found.values()), warnings

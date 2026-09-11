@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=NSLM
+Comment=Non-Steam Game Library Manager
+Exec=/home/deck/Applications/NSLM/NSLM
+Icon=/home/deck/Applications/NSLM/assets/logo-white.png
+Terminal=false
+Categories=Utility;Game;
+StartupNotify=true

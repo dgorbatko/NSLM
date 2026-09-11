@@ -25,7 +25,9 @@ class SourceDialog(QDialog):
         form = QFormLayout()
         self.source_form = form
         self.kind = QComboBox()
-        self.kind.addItem('Windows PC Games', 'pc')
+        self.kind.addItem('Windows / Proton Games' if os.name != 'nt' else 'Windows PC Games', 'pc')
+        if os.name != 'nt':
+            self.kind.addItem('Native Linux Games', 'linux_pc')
         self.kind.addItem('Nintendo Switch · Ryujinx (EmuDeck)', 'switch_ryujinx')
         self.kind.addItem('Nintendo Switch · Yuzu / Eden / Suyu', 'switch_yuzu')
         self.kind.addItem('Custom Emulator / ROMs', 'custom')
@@ -129,6 +131,13 @@ class SourceDialog(QDialog):
             (Path(user_profile) / 'Emulation' / 'emulators' / 'yuzu' / 'yuzu-windows-msvc' / 'yuzu.exe', 'switch_yuzu', '-f -g "{rom}"'),
             (Path(user_profile) / 'Emulation' / 'tools' / 'launchers' / 'yuzu.bat', 'switch_yuzu', '-f -g "{rom}"'),
         ]
+        if os.name != 'nt':
+            candidate_emulators = [
+                (Path(user_profile) / 'Emulation' / 'tools' / 'launchers' / 'ryujinx.sh', 'switch_ryujinx', '"{rom}"'),
+                (Path(user_profile) / 'Emulation' / 'tools' / 'launchers' / 'yuzu.sh', 'switch_yuzu', '-f -g "{rom}"'),
+                (Path(user_profile) / 'Emulation' / 'tools' / 'launchers' / 'eden.sh', 'switch_yuzu', '-f -g "{rom}"'),
+                (Path(user_profile) / 'Emulation' / 'tools' / 'launchers' / 'suyu.sh', 'switch_yuzu', '-f -g "{rom}"'),
+            ] + candidate_emulators
 
         found_emu, detected_kind, detected_args = None, None, None
         for path, kind, args in candidate_emulators:
@@ -148,8 +157,9 @@ class SourceDialog(QDialog):
             QMessageBox.information(self, 'EmuDeck Detected',
                 f'Found EmuDeck configuration!\n\nROMs folder: {found_roms or "Not detected"}\nEmulator: {found_emu or "Not detected"}')
         else:
+            location = '~/Emulation' if os.name != 'nt' else '%USERPROFILE%\\Emulation or drive roots'
             QMessageBox.information(self, 'EmuDeck Not Found',
-                'EmuDeck was not found in standard locations (%USERPROFILE%\\Emulation or drive roots).\n\nPlease select your ROMs folder and emulator executable manually.')
+                f'EmuDeck was not found in standard locations ({location}).\n\nPlease select your ROMs folder and emulator executable manually.')
 
     def pick_folder(self):
         path = QFileDialog.getExistingDirectory(self, 'Game folder', self.path.text())
@@ -157,7 +167,8 @@ class SourceDialog(QDialog):
             self.path.setText(path)
 
     def pick_emulator(self):
-        path, _ = QFileDialog.getOpenFileName(self, 'Emulator Executable', '', 'Executable (*.exe *.bat *.cmd)')
+        filters = 'Executable (*.exe *.bat *.cmd *.sh *.AppImage);;All Files (*)' if os.name != 'nt' else 'Executable (*.exe *.bat *.cmd)'
+        path, _ = QFileDialog.getOpenFileName(self, 'Emulator Executable', '', filters)
         if path:
             self.emulator.setText(path)
 
@@ -209,7 +220,7 @@ class AddGameDialog(QDialog):
         form = QFormLayout()
 
         self.exe = QLineEdit()
-        self.exe.setPlaceholderText('Path to game .exe or ROM')
+        self.exe.setPlaceholderText('Path to game executable, launcher, or ROM')
         row_exe = QHBoxLayout()
         row_exe.addWidget(self.exe, 1)
         row_exe.addWidget(button('Browse...', self.pick_exe))
@@ -270,7 +281,7 @@ class AddGameDialog(QDialog):
         layout.addWidget(buttons)
 
     def pick_exe(self):
-        path, _ = QFileDialog.getOpenFileName(self, 'Select Game Executable', self.exe.text(), 'Executables & ROMs (*.exe *.nsp *.xci *.nro *.iso *.chd *.zip);;All Files (*.*)')
+        path, _ = QFileDialog.getOpenFileName(self, 'Select Game Executable', self.exe.text(), 'Executables & ROMs (*.exe *.sh *.AppImage *.nsp *.xci *.nro *.iso *.chd *.zip);;All Files (*)')
         if path:
             self.exe.setText(path)
             self.start_dir.setText(str(Path(path).parent))
@@ -428,7 +439,8 @@ class SettingsDialog(QDialog):
         self.sgdb.setEchoMode(QLineEdit.Password)
         self.sgdb.setPlaceholderText('SteamGridDB API key')
         art.addWidget(self.sgdb)
-        art.addWidget(label('The key is encrypted for your Windows account.', 'muted', True))
+        protection_note = 'The key is encrypted for your Windows account.' if os.name == 'nt' else 'The key is stored in NSLM\'s local application data on this device.'
+        art.addWidget(label(protection_note, 'muted', True))
         art.addStretch()
         tabs.addTab(art_page, 'Artwork')
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
@@ -603,7 +615,7 @@ class GameDialog(QDialog):
         super().reject()
 
     def pick_exe(self):
-        path, _ = QFileDialog.getOpenFileName(self, 'Game executable', self.exe.currentText(), 'Executable (*.exe)')
+        path, _ = QFileDialog.getOpenFileName(self, 'Game executable', self.exe.currentText(), 'Executable (*.exe *.sh *.AppImage);;All Files (*)')
         if path:
             self.exe.setCurrentText(path)
             self.start_dir.setText(str(Path(path).parent))

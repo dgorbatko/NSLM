@@ -91,6 +91,13 @@ EMULATOR_PRESETS = {
         'args_template': '',
         'extensions': '.exe',
     },
+    'linux_pc': {
+        'label': 'Linux PC Games',
+        'kind': 'linux_pc',
+        'emulator': '',
+        'args_template': '',
+        'extensions': '',
+    },
     'switch_ryujinx': {
         'label': 'Nintendo Switch · Ryujinx (EmuDeck)',
         'kind': 'switch_ryujinx',

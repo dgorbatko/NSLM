@@ -72,7 +72,7 @@ def matching_existing(game, remaining):
             if len(matches) == 1:
                 return matches[0]
         return None
-    if game.kind != 'pc':
+    if game.kind not in {'pc', 'linux_pc'}:
         return None
     executable_paths = {normal_path(game.exe), *(normal_path(path) for path in game.alternatives)}
     matches = [item for item in remaining.values() if normal_path(item.exe) in executable_paths]
@@ -93,7 +93,7 @@ def matching_existing(game, remaining):
 
 def needs_launcher_repair(scanned, existing):
     """Flag an existing PC shortcut only when a verified replacement exists locally."""
-    if scanned.kind != 'pc':
+    if scanned.kind not in {'pc', 'linux_pc'}:
         return False
     try:
         return Path(scanned.exe).is_file() and not Path(existing.exe.strip('"')).is_file()
@@ -257,7 +257,8 @@ class MainWindow(QMainWindow):
         layout.addLayout(row)
         card, content = panel(name='banner')
         content.addWidget(label('Folder types', 'section'))
-        content.addWidget(label('Windows: a folder containing games. Switch: a ROM folder and Eden executable. Scanning never changes Steam.', 'muted', True))
+        pc_label = 'Windows / Proton' if sys.platform != 'win32' else 'Windows'
+        content.addWidget(label(f'{pc_label}: a folder containing games. Linux: a folder containing native Linux games. Switch: a ROM folder and emulator launcher. Scanning never changes Steam.', 'muted', True))
         layout.addWidget(card)
         self.stack.addWidget(page)
 
@@ -747,8 +748,10 @@ class MainWindow(QMainWindow):
                 kind = 'Nintendo Switch · Yuzu'
             elif k == 'custom':
                 kind = 'Custom Emulator'
+            elif k == 'linux_pc':
+                kind = 'Linux PC'
             else:
-                kind = 'Windows PC'
+                kind = 'Windows / Proton' if sys.platform != 'win32' else 'Windows PC'
             state = 'Enabled' if source.get('enabled', True) else 'Disabled'
             item = QListWidgetItem()
             item.setSizeHint(QSize(0, 74))

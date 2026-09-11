@@ -7,7 +7,15 @@ import tempfile
 
 
 def data_dir():
-    path = Path(os.environ.get('NSLM_DATA', os.environ.get('STEAMSHELF_DATA', str(Path(os.environ.get('LOCALAPPDATA', Path.home())) / 'NSLM'))))
+    override = os.environ.get('NSLM_DATA') or os.environ.get('STEAMSHELF_DATA')
+    if override:
+        path = Path(override)
+    elif os.name == 'nt':
+        path = Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'NSLM'
+    else:
+        # SteamOS follows the normal Linux XDG layout.  Keeping NSLM's cache
+        # here also avoids leaving application files directly in the home dir.
+        path = Path(os.environ.get('XDG_DATA_HOME', str(Path.home() / '.local' / 'share'))) / 'NSLM'
     path.mkdir(parents=True, exist_ok=True)
     return path
 

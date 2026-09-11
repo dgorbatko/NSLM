@@ -32,6 +32,11 @@ def discover_steam():
     mac_steam = Path.home() / 'Library/Application Support/Steam'
     if mac_steam.is_dir():
         return str(mac_steam)
+    # SteamOS normally exposes all three paths below as aliases.  Prefer the
+    # canonical XDG path, but retain the other common Linux locations too.
+    for linux_steam in (Path.home() / '.local/share/Steam', Path.home() / '.steam/steam', Path.home() / '.steam/root'):
+        if linux_steam.is_dir() and (linux_steam / 'userdata').is_dir():
+            return str(linux_steam.resolve())
     return ''
 
 
@@ -224,8 +229,12 @@ def shortcut_id(exe, name):
 
 def running():
     result = []
+    # SteamOS can briefly leave steamwebhelper alive while its main launcher
+    # is transitioning.  Treat that as busy too: refusing a write is safer
+    # than racing Steam's shortcut-file reload.
+    names = {'steam.exe'} if sys.platform == 'win32' else {'steam', 'steamwebhelper'}
     for process in psutil.process_iter(['name', 'exe']):
-        if (process.info['name'] or '').casefold() == 'steam.exe':
+        if (process.info['name'] or '').casefold() in names:
             result.append(process)
     return result
 
@@ -244,6 +253,11 @@ def shutdown(steam, force=False, progress=lambda _: None):
         subprocess.Popen([str(exe), '-shutdown'], creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     elif sys.platform == 'darwin':
         subprocess.Popen(['osascript', '-e', 'tell application "Steam" to quit'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        # On SteamOS this asks the active Steam client, including Gaming Mode,
+        # to exit cleanly before its VDF files are touched.
+        launcher = shutil.which('steam') or str(Path(steam) / 'steam.sh')
+        subprocess.Popen([launcher, '-shutdown'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     deadline = time.monotonic() + 25
     while running() and time.monotonic() < deadline:
         time.sleep(.3)
@@ -254,7 +268,7 @@ def shutdown(steam, force=False, progress=lambda _: None):
             try:
                 # Never terminate game children or the system Steam service.
                 for child in process.children(recursive=True):
-                    if child.name().casefold() in {'steamwebhelper.exe', 'gameoverlayui.exe'}:
+                    if child.name().casefold() in {'steamwebhelper.exe', 'gameoverlayui.exe', 'steamwebhelper', 'gameoverlayui'}:
                         child.kill()
                 process.kill()
             except psutil.NoSuchProcess:
@@ -273,6 +287,9 @@ def restart(steam):
         subprocess.Popen([str(exe)], creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     elif sys.platform == 'darwin':
         subprocess.Popen(['open', '-a', 'Steam'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        launcher = shutil.which('steam') or str(Path(steam) / 'steam.sh')
+        subprocess.Popen([launcher], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 class Snapshot(dict):

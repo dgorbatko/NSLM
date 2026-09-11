@@ -120,7 +120,8 @@ def test_folder_changes_wait_for_save(app, tmp_path):
     window.refresh_sources()
     assert store.settings.get('sources', []) == []
     assert window.source_list.itemWidget(window.source_list.item(0)) is not None
-    assert 'Windows PC' in window.source_list.itemWidget(window.source_list.item(0)).findChildren(
+    expected_platform = 'Windows PC' if os.name == 'nt' else 'Windows / Proton'
+    assert expected_platform in window.source_list.itemWidget(window.source_list.item(0)).findChildren(
         __import__('PySide6.QtWidgets', fromlist=['QLabel']).QLabel)[-1].text()
     assert window.save_sources_button.isEnabled()
     window.save_sources()

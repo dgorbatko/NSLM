@@ -13,7 +13,7 @@ from shelf import steam, vdf
 from shelf.models import Game, Source, clean_name
 from shelf.app import matching_existing, needs_launcher_repair
 from shelf.scanner import scan
-from shelf.storage import Store, protect
+from shelf.storage import Store, protect, data_dir
 from shelf.providers import Providers, exact_match, smart_match, search_names, title_queries
 from shelf.models import is_emulator
 
@@ -120,6 +120,40 @@ def test_installed_native_steam_game_is_detected_without_shortcuts(tmp_path):
     native = steam.installed_native_games(root)
     assert native == [{'name': 'Fall Guys', 'appid': 1097150, 'directory': str(app_dir)}]
     assert steam.native_match(Game('Fall Guys', str(exe)), native)['appid'] == 1097150
+
+
+def test_linux_steam_discovery_and_xdg_data_dir(tmp_path, monkeypatch):
+    home = tmp_path / 'home'
+    steam_root = home / '.local' / 'share' / 'Steam'
+    (steam_root / 'userdata').mkdir(parents=True)
+    monkeypatch.setattr(steam.Path, 'home', lambda: home)
+    monkeypatch.delenv('NSLM_DATA', raising=False)
+    monkeypatch.delenv('STEAMSHELF_DATA', raising=False)
+    monkeypatch.setenv('XDG_DATA_HOME', str(home / '.data'))
+    assert steam.discover_steam() == str(steam_root.resolve())
+    assert data_dir() == home / '.data' / 'NSLM'
+
+
+def test_linux_source_scans_executable_without_extension(tmp_path):
+    root = tmp_path / 'Native Games'
+    game = root / 'Example Native Game' / 'example-game'
+    game.parent.mkdir(parents=True)
+    game.write_text('#!/bin/sh\nexit 0\n', 'utf-8')
+    game.chmod(0o755)
+    found, warnings = scan([Source(str(root), kind='linux_pc')], threading.Event())
+    assert not warnings
+    assert len(found) == 1
+    assert found[0].exe == str(game)
+    assert found[0].kind == 'linux_pc'
+
+
+def test_linux_steam_webhelper_is_treated_as_busy(monkeypatch):
+    class Process:
+        info = {'name': 'steamwebhelper', 'exe': '/home/deck/.local/share/Steam/ubuntu12_64/steamwebhelper'}
+
+    monkeypatch.setattr(steam.sys, 'platform', 'linux')
+    monkeypatch.setattr(steam.psutil, 'process_iter', lambda _: [Process()])
+    assert len(steam.running()) == 1
 
 
 def test_native_match_does_not_guess_between_same_title_games(tmp_path):
