@@ -45,6 +45,10 @@ class Game:
     search_names: list[str] = field(default_factory=list)
     appid: int = 0
     existing: bool = False
+    # A Remote Play card belongs to another computer's shortcut library.  The
+    # Deck only receives local grid artwork for its existing streamed card;
+    # it must never receive a duplicate shortcuts.vdf entry.
+    remote: bool = False
     selected: bool = True
     sgdb_id: int = 0
     art: dict[str, str] = field(default_factory=dict)
@@ -57,6 +61,8 @@ class Game:
 
     @property
     def key(self):
+        if self.remote and self.appid:
+            return f'remote:{self.appid & 0xffffffff}'
         return identity(self.exe, self.args)
 
     def to_dict(self):

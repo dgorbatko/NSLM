@@ -278,7 +278,7 @@ class GameCard(QFrame):
         title.setToolTip(game.name)
         row.addWidget(title, 1)
         layout.addLayout(row)
-        status = 'In Steam' if game.existing else ('Review needed' if game.confidence < 60 else 'Ready to add')
+        status = 'Remote Play' if game.remote else ('In Steam' if game.existing else ('Review needed' if game.confidence < 60 else 'Ready to add'))
         if game.existing and game.pending:
             status = 'Pending changes'
         subtitle = ('EDEN  ·  ' if game.kind == 'eden' else '') + status

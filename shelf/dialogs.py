@@ -425,6 +425,22 @@ class SettingsDialog(QDialog):
         self.restart.setChecked(store.settings.get('restart', True))
         form.addRow(self.restart)
         form.addRow(label('After adding games, NSLM leaves Steam closed and offers a Launch Steam button.', 'muted', True))
+        self.remote_enabled = QCheckBox('Include Remote Play shortcuts from another PC')
+        self.remote_enabled.setChecked(store.settings.get('remote_play_enabled', False))
+        form.addRow(self.remote_enabled)
+        self.remote_shortcuts = QLineEdit(store.settings.get('remote_shortcuts', ''))
+        remote_row = QHBoxLayout()
+        remote_row.addWidget(self.remote_shortcuts)
+        self.remote_browse = button('Browse', self.pick_remote_shortcuts)
+        remote_row.addWidget(self.remote_browse)
+        form.addRow('Remote shortcut file', remote_row)
+        self.remote_note = label(
+            'Choose a copied shortcuts.vdf from the PC that hosts your Remote Play games. '
+            'NSLM reads it only to recognize cards, then writes artwork only to this Steam profile.',
+            'muted', True)
+        form.addRow(self.remote_note)
+        self.remote_enabled.toggled.connect(self.update_remote_controls)
+        self.update_remote_controls(self.remote_enabled.isChecked())
         tabs.addTab(steam_page, 'Steam')
         self.path.editingFinished.connect(self.refresh_profiles)
         self.refresh_profiles()
@@ -464,10 +480,32 @@ class SettingsDialog(QDialog):
             self.path.setText(path)
             self.refresh_profiles()
 
+    def pick_remote_shortcuts(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, 'Choose copied Remote Play shortcuts.vdf', self.remote_shortcuts.text(),
+            'Steam shortcuts (shortcuts.vdf);;All files (*)')
+        if path:
+            self.remote_shortcuts.setText(path)
+
+    def update_remote_controls(self, enabled):
+        self.remote_shortcuts.setEnabled(enabled)
+        self.remote_browse.setEnabled(enabled)
+        self.remote_note.setEnabled(enabled)
+
     def save(self):
         try:
-            steam.config_path(self.path.text(), self.profile.currentData() or '')
-            self.store.settings.update(steam=self.path.text(), profile=self.profile.currentData(), auto_scan=False, restart=self.restart.isChecked())
+            config = steam.config_path(self.path.text(), self.profile.currentData() or '')
+            remote_path = self.remote_shortcuts.text().strip()
+            if self.remote_enabled.isChecked():
+                if not remote_path:
+                    raise ValueError('Choose the copied shortcuts.vdf file for Remote Play games, or turn off Remote Play shortcuts.')
+                # Validate the selected binary now. This is read-only and
+                # prevents a settings change that would hide the library later.
+                steam.remote_library(remote_path, config)
+            self.store.settings.update(
+                steam=self.path.text(), profile=self.profile.currentData(), auto_scan=False,
+                restart=self.restart.isChecked(), remote_play_enabled=self.remote_enabled.isChecked(),
+                remote_shortcuts=remote_path)
             self.store.set_secret('sgdb_key', self.sgdb.text().strip())
             self.store.save()
             self.accept()

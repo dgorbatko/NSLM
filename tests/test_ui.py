@@ -93,6 +93,22 @@ def test_artwork_incomplete_filter_and_card_caption(app, tmp_path):
     window.close()
 
 
+def test_remote_play_filter_and_card_status(app, tmp_path):
+    window = MainWindow(Store(tmp_path / 'data'), startup=False)
+    remote = Game('Remote game', str(tmp_path / 'remote.exe'), appid=42, existing=True, remote=True)
+    local = Game('Local game', str(tmp_path / 'local.exe'), existing=True)
+    window.games = [remote, local]
+    window.show()
+    window.filter.setCurrentIndex(6)
+    window.render_games()
+    app.processEvents()
+    assert window.visible_games() == [remote]
+    labels = [item.text() for item in window.grid.itemAtPosition(0, 0).widget().findChildren(
+        __import__('PySide6.QtWidgets', fromlist=['QLabel']).QLabel)]
+    assert 'Remote Play' in labels
+    window.close()
+
+
 def test_add_game_dialog_creates_valid_game(app, tmp_path):
     store = Store(tmp_path / 'data')
     exe = tmp_path / 'MyStandaloneGame.exe'

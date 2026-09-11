@@ -32,6 +32,7 @@ The installer downloads the current Linux release, verifies its SHA-256 checksum
 - Detects installed native Steam games to avoid offering duplicates as non-Steam shortcuts.
 - Supports Windows / Proton games, native Linux games, plus custom emulator and Nintendo Switch ROM entries.
 - Reconciles an existing non-Steam library instead of blindly adding duplicates.
+- Optionally imports a PC's Remote Play shortcut list on Steam Deck, so streamed cards can receive Deck-local artwork without creating duplicate shortcuts.
 - Downloads Steam library artwork in five forms: Cover, Grid, Hero, Logo, and Icon.
 - Uses official Steam artwork first, then falls back to SteamGridDB when Steam does not provide an image.
 - Shows official Steam and SteamGridDB alternatives together in the artwork picker, with the official choices first.
@@ -55,6 +56,7 @@ The installer downloads the current Linux release, verifies its SHA-256 checksum
 - Windows `.exe` shortcuts are added normally, but Steam's **Compatibility** setting still controls Proton. In Steam, enable **Force the use of a specific Steam Play compatibility tool** for a Windows shortcut when it needs Proton.
 - NSLM detects the usual EmuDeck layout under `~/Emulation`, including `.sh` launcher scripts.
 - Updating shortcuts requires Steam to be closed. On Steam Deck this may exit Gaming Mode; choose **Launch Steam** after the update only when you want to return to Steam immediately.
+- To add artwork to non-Steam games streamed from a PC, copy that PC's `userdata/<profile>/config/shortcuts.vdf` to a persistent folder on the Deck. In **Settings → Steam**, enable **Include Remote Play shortcuts from another PC** and select that copied file. These cards are labelled **Remote Play**; NSLM only writes their Cover/Grid/Hero/Logo/Icon into the Deck's local Steam artwork folder and never creates a duplicate Deck shortcut.
 
 ## Artwork sources
 

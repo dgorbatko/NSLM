@@ -72,6 +72,38 @@ def test_insert_then_skip_then_update_preserves_unknown(fixture):
     assert edited.get('AppName') == 'Renamed'
 
 
+def test_remote_play_library_reads_pc_shortcuts_but_uses_deck_artwork(fixture, tmp_path):
+    root, config, exe = fixture
+    pc_shortcuts = tmp_path / 'PC-shortcuts.vdf'
+    binary, _, changes, _ = steam.prepare(config, [Game('Remote game', str(exe))])
+    pc_shortcuts.write_bytes(binary)
+    appid = changes[0][1]
+    (config / 'grid').mkdir()
+    deck_cover = config / 'grid' / f'{appid}p.png'
+    deck_cover.write_bytes(b'deck-art')
+
+    games = steam.remote_library(pc_shortcuts, config)
+
+    assert len(games) == 1
+    assert games[0].remote and games[0].existing
+    assert games[0].appid == appid
+    assert games[0].art == {'portrait': str(deck_cover.resolve())}
+
+
+def test_remote_play_apply_writes_artwork_without_creating_a_shortcut(fixture, tmp_path):
+    root, config, _exe = fixture
+    image = tmp_path / 'cover.png'
+    Image.new('RGB', (24, 36), 'red').save(image)
+    game = Game('Remote game', r'C:\\Games\\Remote.exe', appid=123456789,
+                existing=True, remote=True, art={'portrait': str(image)})
+
+    result = steam.apply(root, '123', [game], tmp_path / 'backups', launch=False)
+
+    assert result['changed'] == [('Remote game', 123456789)]
+    assert not (config / 'shortcuts.vdf').exists()
+    assert (config / 'grid' / '123456789p.png').read_bytes().startswith(b'\x89PNG')
+
+
 def test_batch_duplicates_and_eden_same_title(fixture):
     root, config, exe = fixture
     games = [Game('Switch Game', str(exe), '-g "a.nsp"'), Game('Switch Game', str(exe), '-g "b.nsp"')]

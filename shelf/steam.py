@@ -104,6 +104,35 @@ def library(config):
     return games
 
 
+def remote_library(shortcuts_file, config):
+    """Read another computer's non-Steam shortcut list for Remote Play art.
+
+    Steam does not copy remote shortcut definitions into the Deck profile.
+    The imported VDF is therefore strictly a read-only catalogue: the cards
+    retain the PC shortcut appid, while artwork is looked up in *this* local
+    profile's grid directory.
+    """
+    path = Path(shortcuts_file).expanduser()
+    if not path.is_file():
+        raise ValueError('Remote Play shortcut file was not found. Choose a copied shortcuts.vdf file in Settings.')
+    tree = vdf.loads(path.read_bytes())
+    games = []
+    seen = set()
+    for entry in vdf.shortcuts(tree).value:
+        appid = int(entry.get('appid', 0)) & 0xffffffff
+        name = str(entry.get('AppName', '')).strip()
+        if not appid or not name or appid in seen:
+            continue
+        seen.add(appid)
+        games.append(Game(
+            name, entry.get('Exe', '').strip('"'), entry.get('LaunchOptions', ''),
+            source=str(path), kind='remote', confidence=100, appid=appid,
+            existing=True, remote=True, selected=False, art=art_for(config, appid),
+            start_dir=entry.get('StartDir', '').strip('"'),
+        ))
+    return games
+
+
 def _tags(entry):
     """Return a shortcut's tags without assuming that the optional node exists."""
     return [item.value for item in (entry.get('tags', []) or []) if isinstance(item.value, str) and item.value]
@@ -416,10 +445,11 @@ def read_backup(path, profile):
         return result
 
 
-def replace_snapshot(config, files):
+def replace_snapshot(config, files, preserve=()):
     config = Path(config)
     current = {p.relative_to(config).as_posix() for p in tracked_paths(config, 'localconfig.vdf' in files)}
     links = getattr(files, 'links', {})
+    preserve = set(preserve)
     for name, data in files.items():
         if name in links:
             continue
@@ -429,7 +459,12 @@ def replace_snapshot(config, files):
             if parent.is_symlink() or parent.is_junction():
                 raise ValueError(f'Cannot write through linked directory: {parent}')
             parent = parent.parent
-        atomic_write(config / name, data)
+        target = config / name
+        # Remote Play artwork updates carry shortcuts.vdf in their verified
+        # snapshot, but must not rewrite that untouched file.
+        if name in preserve:
+            continue
+        atomic_write(target, data)
     for name, target in links.items():
         alias, destination = config / name, config / target
         if alias.is_symlink() and alias.resolve() == destination.resolve():
@@ -465,6 +500,31 @@ def write_lock(config):
         yield
     finally:
         path.unlink(missing_ok=True)
+
+
+def artwork_updates(games):
+    """Normalize selected local image files into safe Steam grid updates."""
+    updates, updated_games = {}, set()
+    for game in games:
+        appid = int(game.appid) & 0xffffffff
+        if not appid:
+            continue
+        for kind, image_path in game.art.items():
+            if kind not in SUFFIXES or not Path(image_path).is_file():
+                continue
+            # Normalize to PNG: no mismatched extensions, malformed images or
+            # remote paths can reach the Steam profile at commit time.
+            from PIL import Image
+            import io
+            with Image.open(image_path) as picture:
+                picture.load()
+                if picture.width * picture.height > 50_000_000:
+                    raise ValueError('Image is too large')
+                output = io.BytesIO()
+                picture.convert('RGBA').save(output, format='PNG')
+            updates[f'grid/{appid}{SUFFIXES[kind]}.png'] = output.getvalue()
+            updated_games.add(appid)
+    return updates, updated_games
 
 
 def prepare(config, games, overwrite=False, tags=()):
@@ -510,22 +570,10 @@ def prepare(config, games, overwrite=False, tags=()):
         entry.set('tags', [vdf.Node(1, str(index), tag) for index, tag in enumerate(existing_tags)], 0)
         by_key[game.key] = entry
         by_id[appid] = entry
-        for kind, image_path in game.art.items():
-            if kind not in SUFFIXES or not Path(image_path).is_file():
-                continue
-            # Normalize to PNG: no mismatched extensions, malformed images or remote paths at commit.
-            from PIL import Image
-            import io
-            with Image.open(image_path) as picture:
-                picture.load()
-                if picture.width * picture.height > 50_000_000:
-                    raise ValueError('Image is too large')
-                output = io.BytesIO()
-                picture.convert('RGBA').save(output, format='PNG')
-            name = f'grid/{appid}{SUFFIXES[kind]}.png'
-            art_updates[name] = output.getvalue()
-            if kind == 'icon':
-                entry.set('icon', str(Path(config) / name))
+        game_updates, _ = artwork_updates([Game('', '', appid=appid, art=game.art)])
+        art_updates.update(game_updates)
+        if 'icon' in game.art and f'grid/{appid}{SUFFIXES["icon"]}.png' in game_updates:
+            entry.set('icon', str(Path(config) / f'grid/{appid}{SUFFIXES["icon"]}.png'))
         changes.append((game.name, appid))
     for index, entry in enumerate(root.value):
         entry.name = str(index)
@@ -547,7 +595,18 @@ def apply(steam, profile, games, backup_dir, overwrite=False, force=False, launc
             original = snapshot_files(config, include_favorites)
             before = {k: hashlib.sha256(v).hexdigest() for k, v in original.items()}
             progress('Preparing shortcuts and artwork...')
-            binary, images, changes, skipped = prepare(config, games, overwrite, tags)
+            local_games = [game for game in games if not game.remote]
+            remote_games = [game for game in games if game.remote]
+            binary, images, changes, skipped = prepare(config, local_games, overwrite, tags)
+            local_changes = list(changes)
+            remote_images, remote_updated = artwork_updates(remote_games)
+            images.update(remote_images)
+            remote_changes = [(game.name, int(game.appid) & 0xffffffff) for game in remote_games
+                              if (int(game.appid) & 0xffffffff) in remote_updated]
+            remote_skipped = [game.name for game in remote_games
+                              if (int(game.appid) & 0xffffffff) not in remote_updated]
+            changes += remote_changes
+            skipped += remote_skipped
             if not changes:
                 return {'changed': [], 'skipped': skipped, 'backup': ''}
             progress('Creating backup...')
@@ -555,9 +614,13 @@ def apply(steam, profile, games, backup_dir, overwrite=False, force=False, launc
             if running() or fingerprint(config, include_favorites) != before:
                 raise SteamBusy('Steam restarted or the library changed. Try again.')
             updated = Snapshot(original, links=dict(original.links))
-            updated['shortcuts.vdf'] = binary
-            if include_favorites:
-                updated['localconfig.vdf'] = update_favorites(config, [appid for _, appid in changes])
+            # Remote Play entries are deliberately art-only.  Keeping the
+            # original bytes in the snapshot means no remote card is added to
+            # the Deck's shortcuts.vdf (and no duplicate card can appear).
+            if local_games:
+                updated['shortcuts.vdf'] = binary
+            if include_favorites and local_changes:
+                updated['localconfig.vdf'] = update_favorites(config, [appid for _, appid in local_changes])
             for name, data in images.items():
                 stem = Path(name).stem
                 for old in list(updated):
@@ -572,7 +635,8 @@ def apply(steam, profile, games, backup_dir, overwrite=False, force=False, launc
                     updated[alias] = updated[target]
             try:
                 progress('Updating Steam...')
-                replace_snapshot(config, updated)
+                preserve = {'shortcuts.vdf'} if not local_changes and 'shortcuts.vdf' in original else set()
+                replace_snapshot(config, updated, preserve=preserve)
                 progress('Verifying Steam files...')
                 if fingerprint(config, include_favorites) != {k: hashlib.sha256(v).hexdigest() for k, v in updated.items()}:
                     raise IOError('Write verification failed')

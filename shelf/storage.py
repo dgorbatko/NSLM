@@ -65,7 +65,10 @@ class Store:
     def __init__(self, root=None):
         self.root = Path(root or data_dir())
         self.root.mkdir(parents=True, exist_ok=True)
-        self.settings = self.read('settings.json', {'sources': [], 'steam': '', 'profile': '', 'auto_scan': False, 'restart': True})
+        self.settings = self.read('settings.json', {
+            'sources': [], 'steam': '', 'profile': '', 'auto_scan': False,
+            'restart': True, 'remote_play_enabled': False, 'remote_shortcuts': '',
+        })
         self.catalog = self.read('catalog.json', {})
         migrated = False
         # Purge credentials and catalog-only metadata from the retired integration.

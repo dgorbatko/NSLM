@@ -209,7 +209,7 @@ class MainWindow(QMainWindow):
         self.search.textChanged.connect(self.render_games)
         row.addWidget(self.search, 1)
         self.filter = FilterComboBox()
-        self.filter.addItems(['All games', 'New', 'In Steam', 'Review needed', 'Emulators / Switch', 'Artwork incomplete'])
+        self.filter.addItems(['All games', 'New', 'In Steam', 'Review needed', 'Emulators / Switch', 'Artwork incomplete', 'Remote Play'])
         self.filter.setToolTip('Choose which games to show')
         self.filter.currentIndexChanged.connect(self.render_games)
         row.addWidget(self.filter)
@@ -304,6 +304,17 @@ class MainWindow(QMainWindow):
     def config(self):
         return steam.config_path(self.store.settings.get('steam', ''), self.store.settings.get('profile', ''))
 
+    def library_games(self):
+        """Return local shortcuts plus the optional, read-only Remote Play list."""
+        config = self.config()
+        games = steam.library(config)
+        if not self.store.settings.get('remote_play_enabled', False):
+            return games, 0
+        remote_games = steam.remote_library(self.store.settings.get('remote_shortcuts', ''), config)
+        local_ids = {int(game.appid) & 0xffffffff for game in games if game.appid}
+        remote_games = [game for game in remote_games if (int(game.appid) & 0xffffffff) not in local_ids]
+        return games + remote_games, len(remote_games)
+
     def startup(self):
         self.load_library()
 
@@ -312,7 +323,7 @@ class MainWindow(QMainWindow):
 
     def load_library(self):
         try:
-            self.games = steam.library(self.config())
+            self.games, remote_count = self.library_games()
             for game in self.games:
                 saved = self.store.catalog.get(self.catalog_key(game.key), {})
                 # Steam owns the local artwork paths; NSLM retains only the
@@ -325,7 +336,8 @@ class MainWindow(QMainWindow):
                         if field in saved:
                             setattr(game, field, saved[field])
                     game.selected = True
-            self.status.setText(f'Profile {self.store.settings["profile"]} · non-Steam games: {len(self.games)}')
+            remote_note = f' · Remote Play cards: {remote_count}' if remote_count else ''
+            self.status.setText(f'Profile {self.store.settings["profile"]} · non-Steam games: {len(self.games)}{remote_note}')
         except Exception as error:
             self.status.setText(str(error))
         self.render_games()
@@ -339,7 +351,8 @@ class MainWindow(QMainWindow):
                 index == 2 and game.existing or
                 index == 3 and game.confidence < 60 or
                 index == 4 and is_emulator(game.kind) or
-                index == 5 and len(game.art) < len(ART_TYPES)
+                index == 5 and len(game.art) < len(ART_TYPES) or
+                index == 6 and game.remote
             )
         return [game for game in self.games if text in game.name.casefold() and matches_filter(game)]
 
@@ -456,7 +469,7 @@ class MainWindow(QMainWindow):
         def done(result):
             scanned, warnings = result
             try:
-                existing = steam.library(self.config())
+                existing, _ = self.library_games()
                 native_games = steam.installed_native_games(self.store.settings.get('steam', ''))
             except Exception as error:
                 # Do not treat an unreadable Steam library as empty: that would hide duplicate uncertainty.
@@ -591,17 +604,25 @@ class MainWindow(QMainWindow):
         layout.addWidget(label('Review changes', 'section'))
         new_count = sum(not game.existing for game in selected)
         existing_count = len(selected) - new_count
+        remote_count = sum(game.remote for game in selected)
+        local_selected = [game for game in selected if not game.remote]
         summary = f'{new_count} new game{"s" if new_count != 1 else ""} selected'
         if existing_count:
             summary += f' · {existing_count} existing game{"s" if existing_count != 1 else ""} selected'
+        if remote_count:
+            summary += f' · {remote_count} Remote Play card{"s" if remote_count != 1 else ""}'
         layout.addWidget(label(summary + f'\nSteam profile: {self.store.settings["profile"]}\nSteam will close during the update. A backup will be created first. It will stay closed afterwards unless you choose Launch Steam.', 'muted', True))
+        if remote_count:
+            layout.addWidget(label(
+                'Remote Play cards update artwork on this Steam Deck only. '
+                'NSLM will not add or change their remote shortcut commands.', 'muted', True))
         listing = QListWidget()
         for game in selected:
-            state = 'in Steam' if game.existing else 'new game'
+            state = 'Remote Play artwork' if game.remote else ('in Steam' if game.existing else 'new game')
             listing.addItem(f'{game.name}  ·  {state}  ·  {len(game.art)}/5 images')
         layout.addWidget(listing, 1)
         collection_items = []
-        if available_collections:
+        if available_collections and local_selected:
             layout.addWidget(label('Add to Steam collections (optional)', 'section'))
             layout.addWidget(label('Leave everything unchecked to add games to Uncategorized, as before.', 'muted', True))
             collection_list = QListWidget()
@@ -614,8 +635,9 @@ class MainWindow(QMainWindow):
                 collection_items.append(item)
             layout.addWidget(collection_list)
         overwrite = QCheckBox('Update selected games already in Steam')
-        layout.addWidget(overwrite)
-        layout.addWidget(label('Existing entries are skipped unless this option is enabled.', 'muted', True))
+        if any(game.existing and not game.remote for game in local_selected):
+            layout.addWidget(overwrite)
+            layout.addWidget(label('Existing entries are skipped unless this option is enabled.', 'muted', True))
         force = QCheckBox('Force-close Steam if it does not respond')
         layout.addWidget(force)
         layout.addWidget(label('Close running games before continuing.', 'muted'))
@@ -656,10 +678,12 @@ class MainWindow(QMainWindow):
                     game.existing, game.appid, game.selected = True, changed[game.name], False
                     game.pending = False
             # Reload authoritative IDs to handle same-title games correctly.
-            current = {g.key: g for g in steam.library(self.config())}
+            current = {g.key: g for g in self.library_games()[0]}
             for game in self.games:
                 if game.key in current:
                     game.appid, game.existing = current[game.key].appid, True
+                    if game.remote:
+                        game.art = current[game.key].art
             self.persist()
             self.render_games()
             changed_count, skipped_count = len(result['changed']), len(result['skipped'])
@@ -704,10 +728,17 @@ class MainWindow(QMainWindow):
         if self.worker:
             return
         try:
-            before = (self.store.settings.get('steam'), self.store.settings.get('profile'))
+            before = (
+                self.store.settings.get('steam'), self.store.settings.get('profile'),
+                self.store.settings.get('remote_play_enabled'), self.store.settings.get('remote_shortcuts'),
+            )
             dialog = SettingsDialog(self, self.store)
             if dialog.exec() == QDialog.Accepted:
-                if before != (self.store.settings.get('steam'), self.store.settings.get('profile')):
+                after = (
+                    self.store.settings.get('steam'), self.store.settings.get('profile'),
+                    self.store.settings.get('remote_play_enabled'), self.store.settings.get('remote_shortcuts'),
+                )
+                if before != after:
                     self.load_library()
                 self.status.setText('Settings saved.')
         except Exception as error:
