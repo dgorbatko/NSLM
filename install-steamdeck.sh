@@ -82,18 +82,27 @@ rmdir "$stage"
 stage=""
 
 mkdir -p "$(dirname "$desktop_file")"
-desktop_tmp="${desktop_file}.tmp.$$"
-printf '%s\n' \
+write_launcher() {
+  local destination="$1"
+  local temporary="${destination}.tmp.$$"
+  printf '%s\n' \
   '[Desktop Entry]' \
   'Type=Application' \
   'Name=NSLM' \
   'Comment=Non-Steam Game Library Manager' \
   "Exec=$install_dir/NSLM" \
-  "Icon=$install_dir/assets/logo-white.png" \
+  "Icon=$install_dir/_internal/assets/icon.png" \
   'Terminal=false' \
-  'Categories=Utility;Game;' > "$desktop_tmp"
-chmod +x "$desktop_tmp"
-mv "$desktop_tmp" "$desktop_file"
+  'Categories=Utility;Game;' \
+  'StartupNotify=true' > "$temporary"
+  chmod +x "$temporary"
+  mv "$temporary" "$destination"
+}
+write_launcher "$desktop_file"
+# Linux executables do not contain a Finder/Explorer-style icon.  Keep the
+# binary for scripts, and place an icon-bearing desktop launcher beside it for
+# users opening the installed folder in Dolphin.
+write_launcher "$install_dir/NSLM.desktop"
 if command -v update-desktop-database >/dev/null; then
   update-desktop-database "$(dirname "$desktop_file")" >/dev/null 2>&1 || true
 fi
