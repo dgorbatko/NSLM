@@ -13,6 +13,7 @@ from shelf import steam, vdf
 from shelf.models import Game, Source, clean_name
 from shelf.app import matching_existing, needs_launcher_repair
 from shelf.scanner import scan
+from shelf import storage
 from shelf.storage import Store, protect, data_dir
 from shelf.providers import Providers, exact_match, smart_match, search_names, title_queries
 from shelf.models import is_emulator
@@ -159,6 +160,7 @@ def test_linux_steam_discovery_and_xdg_data_dir(tmp_path, monkeypatch):
     steam_root = home / '.local' / 'share' / 'Steam'
     (steam_root / 'userdata').mkdir(parents=True)
     monkeypatch.setattr(steam.sys, 'platform', 'linux')
+    monkeypatch.setattr(storage.sys, 'platform', 'linux')
     monkeypatch.setattr(steam.Path, 'home', lambda: home)
     monkeypatch.delenv('NSLM_DATA', raising=False)
     monkeypatch.delenv('STEAMSHELF_DATA', raising=False)

@@ -2,6 +2,7 @@ import base64
 import ctypes
 import json
 import os
+import sys
 from pathlib import Path
 import tempfile
 
@@ -10,7 +11,7 @@ def data_dir():
     override = os.environ.get('NSLM_DATA') or os.environ.get('STEAMSHELF_DATA')
     if override:
         path = Path(override)
-    elif os.name == 'nt':
+    elif sys.platform == 'win32':
         path = Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'NSLM'
     else:
         # SteamOS follows the normal Linux XDG layout.  Keeping NSLM's cache
