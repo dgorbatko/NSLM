@@ -1,0 +1,85 @@
+name: Release NSLM
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Build Windows package
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build, test, and package
+        shell: pwsh
+        run: ./build.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: |
+            dist/NSLM-Windows-x64.zip
+            dist/NSLM-Source.zip
+          if-no-files-found: error
+
+  linux:
+    name: Build Linux package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Qt runtime dependencies
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxcb-cursor0
+      - name: Build, test, and package
+        run: ./build-linux.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-release
+          path: |
+            dist/NSLM-SteamDeck-Linux-x64.zip
+            dist/NSLM-SteamDeck-Linux-x64.zip.sha256
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Create checksums and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cd release-assets
+          sha256sum NSLM-Windows-x64.zip NSLM-SteamDeck-Linux-x64.zip NSLM-Source.zip > SHA256SUMS.txt
+          cat > RELEASE_NOTES.md <<'EOF'
+          ## Highlights
+
+          - Optional **Remote Play** artwork library for Steam Deck: import a copied Windows `shortcuts.vdf` and update Deck-local artwork without creating duplicate shortcuts.
+          - Desktop launcher is created and refreshed by every Steam Deck installation or update.
+          - Windows and Steam Deck packages are built and tested from the same tagged source revision.
+
+          ## Downloads
+
+          - **Windows:** extract `NSLM-Windows-x64.zip` and run `NSLM.exe`.
+          - **Steam Deck / Linux:** extract `NSLM-SteamDeck-Linux-x64.zip` in Desktop Mode and run `NSLM`; the README also includes the one-command installer.
+          - **Source:** `NSLM-Source.zip`.
+
+          Verify downloads with `SHA256SUMS.txt`. The Steam Deck installer verifies its archive automatically.
+          EOF
+          gh release create "$TAG" ./*.zip ./*.sha256 SHA256SUMS.txt \
+            --title "NSLM ${TAG#v}" \
+            --notes-file RELEASE_NOTES.md \
+            --latest

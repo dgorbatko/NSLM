@@ -29,5 +29,10 @@ with zipfile.ZipFile(root / 'dist' / 'NSLM-Source.zip', 'w', zipfile.ZIP_DEFLATE
         for file in (root / directory).rglob('*'):
             if file.is_file() and '__pycache__' not in file.parts:
                 archive.write(file, 'NSLM/' + file.relative_to(root).as_posix())
-    for filename in ['main.py', 'NSLM.spec', 'requirements.txt', 'requirements-dev.txt', 'build.ps1', 'README.md', 'THIRD-PARTY-NOTICES.md', 'pytest.ini']:
+    for filename in [
+        'main.py', 'NSLM.spec', 'NSLM-linux.spec',
+        'requirements.txt', 'requirements-dev.txt',
+        'build.ps1', 'build-linux.sh', 'install-steamdeck.sh',
+        'README.md', 'THIRD-PARTY-NOTICES.md', 'LICENSE', 'pytest.ini',
+    ]:
         archive.write(root / filename, 'NSLM/' + filename)
