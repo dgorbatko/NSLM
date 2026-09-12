@@ -80,6 +80,7 @@ jobs:
           Verify downloads with `SHA256SUMS.txt`. The Steam Deck installer verifies its archive automatically.
           EOF
           gh release create "$TAG" ./*.zip ./*.sha256 SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" \
             --title "NSLM ${TAG#v}" \
             --notes-file RELEASE_NOTES.md \
             --latest
