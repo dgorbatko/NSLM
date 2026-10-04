@@ -345,9 +345,18 @@ def test_restarted_steam_aborts_commit(fixture, tmp_path, monkeypatch):
 
 
 def test_linux_restart_uses_steam_desktop_launcher(tmp_path, monkeypatch):
-    """Steam must get its own desktop identity instead of inheriting NSLM's."""
+    """Steam must get its own desktop identity and no PyInstaller runtime."""
     launched = Mock()
     monkeypatch.setattr(steam.sys, 'platform', 'linux')
+    monkeypatch.setattr(steam.os, 'environ', {
+        'LD_LIBRARY_PATH': '/opt/NSLM/_internal:/usr/lib',
+        'LD_LIBRARY_PATH_ORIG': '/usr/local/lib',
+        'PYINSTALLER_PARENT_LEVEL': '1',
+        '_MEIPASS2': '/tmp/_MEI123',
+        'PYTHONHOME': '/opt/NSLM/_internal',
+        'PYTHONPATH': '/opt/NSLM',
+        'XDG_ACTIVATION_TOKEN': 'nslm-token',
+    })
     monkeypatch.setattr(steam.shutil, 'which', lambda name: {
         'steam': '/usr/bin/steam', 'gtk-launch': '/usr/bin/gtk-launch', 'systemd-run': '/usr/bin/systemd-run',
     }.get(name))
@@ -355,6 +364,12 @@ def test_linux_restart_uses_steam_desktop_launcher(tmp_path, monkeypatch):
     steam.restart(tmp_path / 'Steam')
     assert launched.call_args.args[0] == ['/usr/bin/gtk-launch', 'steam']
     assert launched.call_args.kwargs['start_new_session']
+    env = launched.call_args.kwargs['env']
+    assert env['LD_LIBRARY_PATH'] == '/usr/local/lib'
+    assert env['PYINSTALLER_RESET_ENVIRONMENT'] == '1'
+    for key in ('LD_LIBRARY_PATH_ORIG', 'PYINSTALLER_PARENT_LEVEL', '_MEIPASS2',
+                'PYTHONHOME', 'PYTHONPATH', 'XDG_ACTIVATION_TOKEN'):
+        assert key not in env
 
 
 def test_corrupt_library_is_not_overwritten(fixture, tmp_path):

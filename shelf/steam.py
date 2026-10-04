@@ -389,6 +389,23 @@ def restart(steam):
                    [systemd_run, '--user', '--scope', '--collect', '--no-block', '--quiet', '--', launcher]
                    if systemd_run else [launcher])
         env = os.environ.copy()
+        # A one-file PyInstaller app temporarily prepends its own _internal
+        # folder to LD_LIBRARY_PATH.  Starting Steam with that path makes
+        # Steam load NSLM's bundled Qt/PipeWire-related libraries.  On KDE
+        # this has the particularly confusing side effect of presenting
+        # Steam's own PipeWire screen-capture request as "with NSLM".
+        # Restore the pre-PyInstaller loader path (or remove it altogether)
+        # before spawning an independent Steam process.
+        original_library_path = env.pop('LD_LIBRARY_PATH_ORIG', None)
+        if original_library_path:
+            env['LD_LIBRARY_PATH'] = original_library_path
+        else:
+            env.pop('LD_LIBRARY_PATH', None)
+        for key in ('PYINSTALLER_PARENT_LEVEL', 'PYINSTALLER_RESET_ENVIRONMENT',
+                    '_MEIPASS2', 'PYTHONHOME', 'PYTHONPATH'):
+            env.pop(key, None)
+        # Explicitly break PyInstaller's process lineage for the new client.
+        env['PYINSTALLER_RESET_ENVIRONMENT'] = '1'
         for key in ('XDG_ACTIVATION_TOKEN', 'DESKTOP_STARTUP_ID', 'GIO_LAUNCHED_DESKTOP_FILE',
                     'GIO_LAUNCHED_DESKTOP_FILE_PID'):
             env.pop(key, None)
