@@ -20,6 +20,8 @@ from .storage import atomic_write
 
 SUFFIXES = {'portrait': 'p', 'landscape': '', 'hero': '_hero', 'logo': '_logo', 'icon': '_icon'}
 FAVORITES_TAG = 'favorite'
+COLLECTION_TOKEN = 'collection:'
+LEGACY_TAG_TOKEN = 'tag:'
 
 
 def discover_steam():
@@ -139,70 +141,129 @@ def _tags(entry):
     return [item.value for item in (entry.get('tags', []) or []) if isinstance(item.value, str) and item.value]
 
 
-def collections(config):
-    """List the manual Steam collections usable for non-Steam shortcuts.
+def _local_collections(config):
+    """Read Steam's escaped collection JSON from localconfig.vdf."""
+    path = Path(config) / 'localconfig.vdf'
+    if not path.is_file():
+        return {}, None, ''
+    text = path.read_text('utf-8', errors='surrogateescape')
+    match = re.search(r'(?m)^(\s*"user-collections"\s+")((?:\\.|[^"\\])*)("\s*)$', text)
+    if not match:
+        return {}, None, text
+    try:
+        value = json.loads(match.group(2).replace('\\"', '"').replace('\\\\', '\\'))
+    except (ValueError, TypeError, json.JSONDecodeError) as error:
+        raise ValueError('Steam collection configuration could not be read. No files were changed.') from error
+    return value if isinstance(value, dict) else {}, match, text
 
-    Steam represents ordinary collections as shortcut tags.  Its special
-    Favorites collection is named ``favorite`` internally, so expose it with
-    the familiar label while retaining the exact tag value on write.
-    """
+
+def _cloud_collection_files(config):
+    """Steam's current collection names live in its small cloud-storage JSON."""
+    root = Path(config) / 'cloudstorage'
+    return sorted(path for path in root.glob('cloud-storage-namespace-*.json')
+                  if path.is_file() and not path.is_symlink())
+
+
+def _cloud_collections(config):
+    records, sources = {}, {}
+    for path in _cloud_collection_files(config):
+        try:
+            rows = json.loads(path.read_text('utf-8'))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not (isinstance(row, list) and len(row) >= 2 and isinstance(row[0], str)
+                    and row[0].startswith('user-collections.') and isinstance(row[1], dict)):
+                continue
+            entry = row[1]
+            if entry.get('is_deleted') or not isinstance(entry.get('value'), str):
+                continue
+            try:
+                value = json.loads(entry['value'])
+            except (ValueError, TypeError, json.JSONDecodeError):
+                continue
+            collection_id = row[0].removeprefix('user-collections.')
+            if isinstance(value, dict) and isinstance(value.get('name'), str) and value['name'].strip():
+                records[collection_id] = value
+                sources[collection_id] = path
+    return records, sources
+
+
+def collections(config):
+    """List real Steam collections, including modern cloud-backed ones."""
     seen = {}
+    cloud, _sources = _cloud_collections(config)
+    local, _match, _text = _local_collections(config)
+    merged = dict(local)
+    merged.update(cloud)  # Cloud Storage carries the human-readable names.
+    for collection_id, value in merged.items():
+        if collection_id == 'hidden' or not isinstance(value, dict):
+            continue
+        name = value.get('name') or ('Favorites' if collection_id == FAVORITES_TAG else '')
+        if isinstance(name, str) and name.strip():
+            seen.setdefault(name.casefold(), (name, COLLECTION_TOKEN + collection_id))
+    # Very old Steam libraries can still use shortcut tags instead of modern
+    # collections. Keep those available without mistaking them for cloud IDs.
     for entry in vdf.shortcuts(read_tree(config)).value:
         for tag in _tags(entry):
             if tag.casefold() == 'nslm':
                 continue
             label = 'Favorites' if tag.casefold() == FAVORITES_TAG else tag.title()
-            seen.setdefault(label.casefold(), (label, tag))
-    # Favorites can have no non-Steam shortcut yet, but still exists in the
-    # user's Steam profile.  Detect it from the local config without parsing
-    # or rewriting that file here.
-    local_config = Path(config) / 'localconfig.vdf'
-    if local_config.is_file() and re.search(r'(?m)^\s*"user-collections"\s+"', local_config.read_text('utf-8', errors='replace')):
-        seen.setdefault('favorites', ('Favorites', FAVORITES_TAG))
+            seen.setdefault(label.casefold(), (label, LEGACY_TAG_TOKEN + tag))
     return [seen[key] for key in sorted(seen, key=lambda key: (key != 'favorites', key))]
 
 
 def collection_tags(config, labels):
-    """Map UI labels back to Steam's stored tag spelling."""
+    """Map UI labels back to an opaque modern-collection or legacy-tag token."""
     available = {label.casefold(): tag for label, tag in collections(config)}
     return [available[label.casefold()] for label in labels if label.casefold() in available]
 
 
-def update_favorites(config, appids):
-    """Add shortcut IDs to Steam's special Favorites collection atomically.
-
-    Other manual collections live in each shortcut's ``tags`` section.  Steam
-    also keeps Favorites in the profile's localconfig VDF as an escaped JSON
-    value, which must be updated together with the shortcut tag.
-    """
+def update_collections(config, appids, collection_ids):
+    """Add shortcuts to real Steam collections in both local and cloud state."""
     path = Path(config) / 'localconfig.vdf'
-    if not appids:
-        return None
-    if not path.is_file():
-        raise ValueError('Steam Favorites configuration was not found. No files were changed.')
-    text = path.read_text('utf-8', errors='surrogateescape')
-    match = re.search(r'(?m)^(\s*"user-collections"\s+")((?:\\.|[^"\\])*)("\s*)$', text)
-    if not match:
-        raise ValueError('Steam Favorites configuration could not be read. No files were changed.')
-    try:
-        encoded = match.group(2)
-        value = json.loads(encoded.replace('\\"', '"').replace('\\\\', '\\'))
-        favorite = value.setdefault(FAVORITES_TAG, {'id': FAVORITES_TAG, 'added': [], 'removed': []})
-        if not isinstance(favorite, dict) or not isinstance(favorite.get('added', []), list):
-            raise ValueError
-    except (ValueError, TypeError, json.JSONDecodeError) as error:
-        raise ValueError('Steam Favorites configuration could not be read. No files were changed.') from error
-    added = favorite.setdefault('added', [])
-    removed = favorite.setdefault('removed', [])
-    for appid in appids:
-        appid = int(appid) & 0xffffffff
-        if appid not in added:
-            added.append(appid)
-        while appid in removed:
-            removed.remove(appid)
-    payload = json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+    local, match, text = _local_collections(config)
+    if not path.is_file() or match is None:
+        raise ValueError('Steam collection configuration was not found. No files were changed.')
+    cloud, cloud_sources = _cloud_collections(config)
+    records = dict(local)
+    records.update(cloud)
+    unknown = [item for item in collection_ids if item not in records]
+    if unknown:
+        raise ValueError('Selected Steam collection no longer exists. Refresh NSLM and try again.')
+    normalized_ids = [int(appid) & 0xffffffff for appid in appids]
+    for collection_id in collection_ids:
+        value = records[collection_id]
+        if not isinstance(value, dict):
+            raise ValueError('Steam collection configuration could not be read. No files were changed.')
+        added, removed = value.setdefault('added', []), value.setdefault('removed', [])
+        if not isinstance(added, list) or not isinstance(removed, list):
+            raise ValueError('Steam collection configuration could not be read. No files were changed.')
+        for appid in normalized_ids:
+            if appid not in added:
+                added.append(appid)
+            while appid in removed:
+                removed.remove(appid)
+        local[collection_id] = value
+    payload = json.dumps(local, ensure_ascii=False, separators=(',', ':'))
     escaped = payload.replace('\\', '\\\\').replace('"', '\\"')
-    return (text[:match.start(2)] + escaped + text[match.end(2):]).encode('utf-8', errors='surrogateescape')
+    updated = {'localconfig.vdf': (text[:match.start(2)] + escaped + text[match.end(2):]).encode('utf-8', errors='surrogateescape')}
+    timestamp = int(time.time())
+    for cloud_path in sorted(set(cloud_sources.values())):
+        rows = json.loads(cloud_path.read_text('utf-8'))
+        for row in rows:
+            if not (isinstance(row, list) and len(row) >= 2 and isinstance(row[0], str) and isinstance(row[1], dict)):
+                continue
+            collection_id = row[0].removeprefix('user-collections.')
+            if collection_id not in collection_ids or not row[0].startswith('user-collections.'):
+                continue
+            row[1]['value'] = json.dumps(records[collection_id], ensure_ascii=False, separators=(',', ':'))
+            row[1]['timestamp'] = timestamp
+            row[1]['version'] = str(timestamp)
+        updated[cloud_path.relative_to(config).as_posix()] = json.dumps(rows, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+    return updated
 
 
 def installed_native_games(steam):
@@ -319,15 +380,20 @@ def restart(steam):
         subprocess.Popen(['open', '-a', 'Steam'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     else:
         launcher = shutil.which('steam') or str(Path(steam) / 'steam.sh')
-        # Desktop launchers on SteamOS run applications in an app-specific
-        # systemd cgroup.  Starting Steam as our child makes KDE's screen-share
-        # portal attribute Steam's own PipeWire request to NSLM.  A transient
-        # user scope gives Steam its own identity, just like launching it from
-        # the desktop menu does.
+        # Prefer Steam's own desktop launcher. It gives KDE/Portal the Steam
+        # application identity instead of inheriting NSLM's desktop identity,
+        # which otherwise can trigger a bogus Screen Sharing request on Deck.
+        gtk_launch = shutil.which('gtk-launch')
         systemd_run = shutil.which('systemd-run')
-        command = ([systemd_run, '--user', '--scope', '--collect', '--no-block', '--quiet', '--', launcher]
+        command = ([gtk_launch, 'steam'] if gtk_launch else
+                   [systemd_run, '--user', '--scope', '--collect', '--no-block', '--quiet', '--', launcher]
                    if systemd_run else [launcher])
-        subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        env = os.environ.copy()
+        for key in ('XDG_ACTIVATION_TOKEN', 'DESKTOP_STARTUP_ID', 'GIO_LAUNCHED_DESKTOP_FILE',
+                    'GIO_LAUNCHED_DESKTOP_FILE_PID'):
+            env.pop(key, None)
+        subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         env=env, start_new_session=True)
 
 
 class Snapshot(dict):
@@ -349,15 +415,17 @@ def artwork_links(config):
     return links
 
 
-def tracked_paths(config, include_localconfig=False):
+def tracked_paths(config, include_collections=False):
     config = Path(config)
     result = []
     shortcut = config / 'shortcuts.vdf'
     if shortcut.exists():
         result.append(shortcut)
     local_config = config / 'localconfig.vdf'
-    if include_localconfig and local_config.exists():
+    if include_collections and local_config.exists():
         result.append(local_config)
+    if include_collections:
+        result.extend(_cloud_collection_files(config))
     grid = config / 'grid'
     if grid.exists():
         for directory, dirs, files in os.walk(grid, followlinks=False):
@@ -378,23 +446,23 @@ def tracked_paths(config, include_localconfig=False):
     return result
 
 
-def snapshot_files(config, include_localconfig=False):
+def snapshot_files(config, include_collections=False):
     return Snapshot({p.relative_to(config).as_posix(): p.read_bytes()
-                     for p in tracked_paths(config, include_localconfig)}, links=artwork_links(config))
+                     for p in tracked_paths(config, include_collections)}, links=artwork_links(config))
 
 
-def fingerprint(config, include_localconfig=False):
+def fingerprint(config, include_collections=False):
     result = {}
-    for path in tracked_paths(config, include_localconfig):
+    for path in tracked_paths(config, include_collections):
         with path.open('rb') as handle:
             result[path.relative_to(config).as_posix()] = hashlib.file_digest(handle, 'sha256').hexdigest()
     return result
 
 
-def backup(config, destination, progress=lambda _: None, include_localconfig=False):
-    hashes = fingerprint(config, include_localconfig)
+def backup(config, destination, progress=lambda _: None, include_collections=False):
+    hashes = fingerprint(config, include_collections)
     links = artwork_links(config)
-    manifest = {'format': 2, 'profile': Path(config).parent.name, 'created': time.strftime('%Y-%m-%d %H:%M:%S'), 'files': hashes, 'links': links}
+    manifest = {'format': 3, 'profile': Path(config).parent.name, 'created': time.strftime('%Y-%m-%d %H:%M:%S'), 'files': hashes, 'links': links}
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
     path = destination / f'NSLM-{manifest["profile"]}-{time.strftime("%Y%m%d-%H%M%S")}-{uuid.uuid4().hex[:6]}.zip'
@@ -405,7 +473,7 @@ def backup(config, destination, progress=lambda _: None, include_localconfig=Fal
             for index, name in enumerate(hashes):
                 progress(f'Backing up artwork: {index + 1}/{len(hashes)}')
                 archive.write(Path(config) / name, name)
-        if fingerprint(config, include_localconfig) != hashes or artwork_links(config) != links:
+        if fingerprint(config, include_collections) != hashes or artwork_links(config) != links:
             raise RuntimeError('Files changed during backup. Try again.')
         os.replace(tmp, path)
     finally:
@@ -422,14 +490,15 @@ def read_backup(path, profile):
         if len(names) != len(set(names)) or 'manifest.json' not in names:
             raise ValueError('Invalid backup')
         manifest = json.loads(archive.read('manifest.json'))
-        if manifest.get('format') not in (1, 2) or manifest.get('profile') != str(profile):
+        if manifest.get('format') not in (1, 2, 3) or manifest.get('profile') != str(profile):
             raise ValueError('Backup belongs to a different profile or uses an unsupported format')
         if set(names) != set(manifest['files']) | {'manifest.json'}:
             raise ValueError('Archive contents do not match the manifest')
         result = Snapshot()
         for name, expected in manifest['files'].items():
             p = PurePosixPath(name)
-            if '\\' in name or ':' in name or p.is_absolute() or '..' in p.parts or not (name in {'shortcuts.vdf', 'localconfig.vdf'} or (len(p.parts) >= 2 and p.parts[0] == 'grid')):
+            cloud_file = len(p.parts) == 2 and p.parts[0] == 'cloudstorage' and p.name.startswith('cloud-storage-namespace-') and p.suffix == '.json'
+            if '\\' in name or ':' in name or p.is_absolute() or '..' in p.parts or not (name in {'shortcuts.vdf', 'localconfig.vdf'} or cloud_file or (len(p.parts) >= 2 and p.parts[0] == 'grid')):
                 raise ValueError('Unsafe archive path')
             data = archive.read(name)
             if hashlib.sha256(data).hexdigest() != expected:
@@ -448,7 +517,8 @@ def read_backup(path, profile):
 
 def replace_snapshot(config, files, preserve=()):
     config = Path(config)
-    current = {p.relative_to(config).as_posix() for p in tracked_paths(config, 'localconfig.vdf' in files)}
+    includes_collections = 'localconfig.vdf' in files or any(name.startswith('cloudstorage/') for name in files)
+    current = {p.relative_to(config).as_posix() for p in tracked_paths(config, includes_collections)}
     links = getattr(files, 'links', {})
     preserve = set(preserve)
     for name, data in files.items():
@@ -585,20 +655,22 @@ def prepare(config, games, overwrite=False, tags=()):
 
 def apply(steam, profile, games, backup_dir, overwrite=False, force=False, launch=True, collections=(), progress=lambda _: None):
     config = config_path(steam, profile)
-    tags = collection_tags(config, collections)
-    include_favorites = FAVORITES_TAG in {tag.casefold() for tag in tags}
+    selection = collection_tags(config, collections)
+    collection_ids = [token.removeprefix(COLLECTION_TOKEN) for token in selection if token.startswith(COLLECTION_TOKEN)]
+    legacy_tags = [token.removeprefix(LEGACY_TAG_TOKEN) for token in selection if token.startswith(LEGACY_TAG_TOKEN)]
+    include_collections = bool(collection_ids)
     with write_lock(config):
         was_running = bool(running())
         stopped = False
         try:
             shutdown(steam, force, progress)
             stopped = True
-            original = snapshot_files(config, include_favorites)
+            original = snapshot_files(config, include_collections)
             before = {k: hashlib.sha256(v).hexdigest() for k, v in original.items()}
             progress('Preparing shortcuts and artwork...')
             local_games = [game for game in games if not game.remote]
             remote_games = [game for game in games if game.remote]
-            binary, images, changes, skipped = prepare(config, local_games, overwrite, tags)
+            binary, images, changes, skipped = prepare(config, local_games, overwrite, legacy_tags)
             local_changes = list(changes)
             remote_images, remote_updated = artwork_updates(remote_games)
             images.update(remote_images)
@@ -611,8 +683,8 @@ def apply(steam, profile, games, backup_dir, overwrite=False, force=False, launc
             if not changes:
                 return {'changed': [], 'skipped': skipped, 'backup': ''}
             progress('Creating backup...')
-            saved = backup(config, backup_dir, include_localconfig=include_favorites)
-            if running() or fingerprint(config, include_favorites) != before:
+            saved = backup(config, backup_dir, include_collections=include_collections)
+            if running() or fingerprint(config, include_collections) != before:
                 raise SteamBusy('Steam restarted or the library changed. Try again.')
             updated = Snapshot(original, links=dict(original.links))
             # Remote Play entries are deliberately art-only.  Keeping the
@@ -620,8 +692,8 @@ def apply(steam, profile, games, backup_dir, overwrite=False, force=False, launc
             # the Deck's shortcuts.vdf (and no duplicate card can appear).
             if local_games:
                 updated['shortcuts.vdf'] = binary
-            if include_favorites and local_changes:
-                updated['localconfig.vdf'] = update_favorites(config, [appid for _, appid in local_changes])
+            if collection_ids and local_changes:
+                updated.update(update_collections(config, [appid for _, appid in local_changes], collection_ids))
             for name, data in images.items():
                 stem = Path(name).stem
                 for old in list(updated):
@@ -639,7 +711,7 @@ def apply(steam, profile, games, backup_dir, overwrite=False, force=False, launc
                 preserve = {'shortcuts.vdf'} if not local_changes and 'shortcuts.vdf' in original else set()
                 replace_snapshot(config, updated, preserve=preserve)
                 progress('Verifying Steam files...')
-                if fingerprint(config, include_favorites) != {k: hashlib.sha256(v).hexdigest() for k, v in updated.items()}:
+                if fingerprint(config, include_collections) != {k: hashlib.sha256(v).hexdigest() for k, v in updated.items()}:
                     raise IOError('Write verification failed')
             except Exception:
                 replace_snapshot(config, original)

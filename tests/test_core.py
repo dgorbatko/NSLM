@@ -122,19 +122,46 @@ def test_collections_apply_shortcut_tags_and_special_favorites(fixture, tmp_path
     existing = Game('Switch game', str(exe), '-switch')
     binary, _, _, _ = steam.prepare(config, [existing], tags=['SWITCH'])
     (config / 'shortcuts.vdf').write_bytes(binary)
-    assert steam.collections(config) == [('Favorites', 'favorite'), ('Switch', 'SWITCH')]
+    assert steam.collections(config) == [('Favorites', 'collection:favorite'), ('Switch', 'tag:SWITCH')]
 
     game = Game('My game', str(exe), '-new')
     result = steam.apply(root, '123', [game], tmp_path / 'backups', launch=False,
                          collections=['Favorites', 'Switch'])
     appid = result['changed'][0][1]
     entry = next(item for item in vdf.shortcuts(steam.read_tree(config)).value if item.get('appid') == appid)
-    assert set(steam._tags(entry)) == {'NSLM', 'favorite', 'SWITCH'}
+    assert set(steam._tags(entry)) == {'NSLM', 'SWITCH'}
     saved = json.loads(re.search(r'"user-collections"\s+"((?:\\.|[^"\\])*)"',
                                  (config / 'localconfig.vdf').read_text('utf-8')).group(1).replace('\\"', '"'))
     assert appid in saved['favorite']['added']
     backup = next((tmp_path / 'backups').glob('*.zip'))
     assert 'localconfig.vdf' in steam.read_backup(backup, '123')
+
+
+def test_collections_use_modern_steam_cloud_names_and_update_both_stores(fixture, tmp_path):
+    root, config, exe = fixture
+    (config / 'localconfig.vdf').write_text(
+        '"UserLocalConfigStore"\n{\n\t"user-collections"\t\t"{\\"favorite\\":{\\"id\\":\\"favorite\\",\\"added\\":[],\\"removed\\":[]},\\"srm-switch\\":{\\"id\\":\\"srm-switch\\",\\"added\\":[],\\"removed\\":[]}}"\n}\n',
+        'utf-8')
+    cloud = config / 'cloudstorage' / 'cloud-storage-namespace-1.json'
+    cloud.parent.mkdir()
+    cloud.write_text(json.dumps([
+        ['user-collections.favorite', {'value': json.dumps({'id': 'favorite', 'name': 'Favorites', 'added': [], 'removed': []})}],
+        ['user-collections.srm-switch', {'value': json.dumps({'id': 'srm-switch', 'name': 'Switch', 'added': [], 'removed': []})}],
+        ['user-collections.hidden', {'value': json.dumps({'id': 'hidden', 'name': 'Hidden', 'added': [], 'removed': []})}],
+    ]), 'utf-8')
+    assert steam.collections(config) == [('Favorites', 'collection:favorite'), ('Switch', 'collection:srm-switch')]
+
+    result = steam.apply(root, '123', [Game('My game', str(exe))], tmp_path / 'backups', launch=False,
+                         collections=['Favorites', 'Switch'])
+    appid = result['changed'][0][1]
+    entry = next(item for item in vdf.shortcuts(steam.read_tree(config)).value if item.get('appid') == appid)
+    assert set(steam._tags(entry)) == {'NSLM'}
+    saved_cloud = json.loads(cloud.read_text('utf-8'))
+    values = {row[0]: json.loads(row[1]['value']) for row in saved_cloud}
+    assert appid in values['user-collections.favorite']['added']
+    assert appid in values['user-collections.srm-switch']['added']
+    backup = next((tmp_path / 'backups').glob('*.zip'))
+    assert 'cloudstorage/cloud-storage-namespace-1.json' in steam.read_backup(backup, '123')
 
 
 def test_real_crc_vector():
@@ -317,18 +344,17 @@ def test_restarted_steam_aborts_commit(fixture, tmp_path, monkeypatch):
     assert not (config / 'shortcuts.vdf').exists()
 
 
-def test_linux_restart_uses_a_separate_user_scope(tmp_path, monkeypatch):
-    """Steam must not inherit a desktop launcher's application identity."""
+def test_linux_restart_uses_steam_desktop_launcher(tmp_path, monkeypatch):
+    """Steam must get its own desktop identity instead of inheriting NSLM's."""
     launched = Mock()
     monkeypatch.setattr(steam.sys, 'platform', 'linux')
     monkeypatch.setattr(steam.shutil, 'which', lambda name: {
-        'steam': '/usr/bin/steam', 'systemd-run': '/usr/bin/systemd-run',
+        'steam': '/usr/bin/steam', 'gtk-launch': '/usr/bin/gtk-launch', 'systemd-run': '/usr/bin/systemd-run',
     }.get(name))
     monkeypatch.setattr(steam.subprocess, 'Popen', launched)
     steam.restart(tmp_path / 'Steam')
-    assert launched.call_args.args[0] == [
-        '/usr/bin/systemd-run', '--user', '--scope', '--collect', '--no-block', '--quiet', '--', '/usr/bin/steam',
-    ]
+    assert launched.call_args.args[0] == ['/usr/bin/gtk-launch', 'steam']
+    assert launched.call_args.kwargs['start_new_session']
 
 
 def test_corrupt_library_is_not_overwritten(fixture, tmp_path):

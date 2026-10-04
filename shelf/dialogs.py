@@ -39,13 +39,22 @@ class SourceDialog(QDialog):
         self.kind.setCurrentIndex(max(0, idx))
         form.addRow('Type', self.kind)
 
-        self.path = QLineEdit(source.path)
+        suggested_path = source.path or self.default_removable_games_folder()
+        self.path = QLineEdit(suggested_path)
         row = QHBoxLayout()
         row.addWidget(self.path, 1)
         row.addWidget(button('Browse', self.pick_folder))
+        self.removable_btn = button('Browse removable drive…', self.pick_removable_folder)
+        # SteamOS mounts microSD cards below /run/media/<user>. Qt's folder
+        # dialog starts in $HOME and does not always list that mount in its
+        # sidebar, so provide an explicit Deck-friendly entry point.
+        self.removable_btn.setVisible(bool(self.removable_media_root()))
+        row.addWidget(self.removable_btn)
         self.detect_btn = button('⚡ Detect EmuDeck', self.detect_emudeck)
         row.addWidget(self.detect_btn)
         form.addRow('Folder', row)
+        if suggested_path and not source.path:
+            layout.addWidget(label(f'Detected removable games folder: {suggested_path}', 'muted', True))
 
         self.emulator = QLineEdit(source.emulator)
         row_emu = QHBoxLayout()
@@ -161,8 +170,40 @@ class SourceDialog(QDialog):
             QMessageBox.information(self, 'EmuDeck Not Found',
                 f'EmuDeck was not found in standard locations ({location}).\n\nPlease select your ROMs folder and emulator executable manually.')
 
+    @staticmethod
+    def removable_media_root():
+        if os.name == 'nt':
+            return ''
+        root = Path('/run/media') / os.environ.get('USER', Path.home().name)
+        return str(root) if root.is_dir() else ''
+
+    @classmethod
+    def default_removable_games_folder(cls):
+        """Offer a mounted Steam Deck SD Games folder without adding it yet."""
+        root = cls.removable_media_root()
+        if not root:
+            return ''
+        candidates = sorted(Path(root).glob('*/Games'))
+        for candidate in candidates:
+            if candidate.is_dir():
+                return str(candidate)
+        return ''
+
     def pick_folder(self):
-        path = QFileDialog.getExistingDirectory(self, 'Game folder', self.path.text())
+        start = self.path.text()
+        if not Path(start).is_dir():
+            start = self.default_removable_games_folder() or self.removable_media_root() or str(Path.home())
+        path = QFileDialog.getExistingDirectory(self, 'Game folder', start)
+        if path:
+            self.path.setText(path)
+
+    def pick_removable_folder(self):
+        root = self.removable_media_root()
+        if not root:
+            QMessageBox.information(self, 'No removable drive found',
+                'No mounted removable drive was found. Mount the SD card in Desktop Mode and try again.')
+            return
+        path = QFileDialog.getExistingDirectory(self, 'Game folder on removable drive', root)
         if path:
             self.path.setText(path)
 
